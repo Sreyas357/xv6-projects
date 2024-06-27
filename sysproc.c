@@ -13,6 +13,7 @@ sys_fork(void)
   return fork();
 }
 
+
 int
 sys_exit(void)
 {
@@ -89,3 +90,5 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+

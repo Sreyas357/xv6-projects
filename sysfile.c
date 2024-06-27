@@ -16,6 +16,7 @@
 #include "file.h"
 #include "fcntl.h"
 
+
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
 static int
@@ -251,7 +252,7 @@ create(char *path, short type, short major, short minor)
   if((ip = dirlookup(dp, name, 0)) != 0){
     iunlockput(dp);
     ilock(ip);
-    if(type == T_FILE && ip->type == T_FILE)
+    if((type == T_FILE || type == T_SYMLINK) && ip->type == T_FILE)
       return ip;
     iunlockput(ip);
     return 0;
@@ -288,7 +289,7 @@ sys_open(void)
   char *path;
   int fd, omode;
   struct file *f;
-  struct inode *ip;
+  struct inode *ip,*ip_next;
 
   if(argstr(0, &path) < 0 || argint(1, &omode) < 0)
     return -1;
@@ -307,6 +308,44 @@ sys_open(void)
       return -1;
     }
     ilock(ip);
+
+    if( ip->type == T_SYMLINK && omode != O_NOFOLLOW){
+
+
+      int count = 0;  //count for checking loops in symlink;
+
+      while(ip->type == T_SYMLINK && count < 12 ){
+        
+
+        ip_next = namei( ip->symlink_name);
+        
+        if(ip_next == 0){
+          
+          iunlockput(ip);
+          end_op();
+
+          return -1;
+
+        }
+
+        iunlockput(ip);
+
+        ilock(ip_next) ;
+        ip = ip_next;
+        count++;
+      }
+
+      if(count == 12 ){
+
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+
+
+    }
+
+
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
       end_op();
@@ -330,6 +369,8 @@ sys_open(void)
   f->readable = !(omode & O_WRONLY);
   f->writable = (omode & O_WRONLY) || (omode & O_RDWR);
   return fd;
+
+
 }
 
 int
@@ -441,4 +482,42 @@ sys_pipe(void)
   fd[0] = fd0;
   fd[1] = fd1;
   return 0;
+}
+
+//syscall for creating symlink
+
+int 
+sys_symlink(void){
+
+  char*target,*path;
+
+  if( argstr(0,&target) <0 || argstr(1,&path) <0 ){
+    return -1;
+  }
+
+  begin_op();
+
+  struct inode* ip = create(path,T_SYMLINK,0,0);
+
+  if(ip == 0){
+    end_op();
+    return -1;
+  }
+
+  int len = strlen(target);
+
+  if( len > MAXFILE_NAME){
+    panic("large symlink file_name ");
+  }
+
+  strncpy(ip->symlink_name,target,len+1);
+
+
+  iupdate(ip);
+  iunlockput(ip);
+
+  end_op();
+
+  return 0;
+
 }

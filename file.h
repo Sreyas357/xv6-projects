@@ -1,5 +1,5 @@
 struct file {
-  enum { FD_NONE, FD_PIPE, FD_INODE } type;
+  enum { FD_NONE, FD_PIPE, FD_INODE } type;  // this enum is to ensure type can take only these values
   int ref; // reference count
   char readable;
   char writable;
@@ -7,6 +7,8 @@ struct file {
   struct inode *ip;
   uint off;
 };
+
+#define MAXFILE_NAME 155
 
 
 // in-memory copy of an inode
@@ -23,6 +25,8 @@ struct inode {
   short nlink;
   uint size;
   uint addrs[NDIRECT+1];
+
+  char symlink_name[MAXFILE_NAME+1];
 };
 
 // table mapping major device number to

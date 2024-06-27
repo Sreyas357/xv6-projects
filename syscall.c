@@ -77,7 +77,7 @@ int
 argstr(int n, char **pp)
 {
   int addr;
-  if(argint(n, &addr) < 0)
+  if(argint(n, &addr) < 0)  //the argument is pointer to char
     return -1;
   return fetchstr(addr, pp);
 }
@@ -103,6 +103,7 @@ extern int sys_unlink(void);
 extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
+extern int sys_symlink(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -126,6 +127,7 @@ static int (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_symlink] sys_symlink,
 };
 
 void
