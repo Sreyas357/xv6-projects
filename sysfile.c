@@ -27,7 +27,7 @@ argfd(int n, int *pfd, struct file **pf)
 
   if(argint(n, &fd) < 0)
     return -1;
-  if(fd < 0 || fd >= NOFILE || (f=myproc()->ofile[fd]) == 0)
+  if(fd < 0 || fd >= NOFILE || ( f=myproc()->ofile[fd] ) == 0)
     return -1;
   if(pfd)
     *pfd = fd;
@@ -39,7 +39,7 @@ argfd(int n, int *pfd, struct file **pf)
 // Allocate a file descriptor for the given file.
 // Takes over file reference from caller on success.
 static int
-fdalloc(struct file *f)
+fdalloc(struct file *f)  //only marks the in process fd table with file f
 {
   int fd;
   struct proc *curproc = myproc();
@@ -54,7 +54,7 @@ fdalloc(struct file *f)
 }
 
 int
-sys_dup(void)
+sys_dup(void)  // increases ref count for the file
 {
   struct file *f;
   int fd;
@@ -280,7 +280,7 @@ create(char *path, short type, short major, short minor)
 
   iunlockput(dp);
 
-  return ip;
+  return ip;+
 }
 
 int
@@ -353,6 +353,7 @@ sys_open(void)
     end_op();
     return -1;
   }
+
   iunlock(ip);
   end_op();
 
