@@ -311,37 +311,30 @@ sys_open(void)
 
     if( ip->type == T_SYMLINK && omode != O_NOFOLLOW){
 
+      int count = 0; // for checking is ther a loop or not
 
-      int count = 0;  //count for checking loops in symlink;
-
-      while(ip->type == T_SYMLINK && count < 12 ){
-        
-
-        ip_next = namei( ip->symlink_name);
+      while(ip->type == T_SYMLINK && count < 10){
+        ip_next= namei(ip->symlink_name);
         
         if(ip_next == 0){
-          
           iunlockput(ip);
           end_op();
-
           return -1;
-
         }
 
         iunlockput(ip);
+        ilock(ip_next);
 
-        ilock(ip_next) ;
         ip = ip_next;
         count++;
+
       }
 
-      if(count == 12 ){
-
+      if(count == 10 || ip->type == T_SYMLINK){
         iunlockput(ip);
         end_op();
         return -1;
       }
-
 
     }
 
@@ -489,35 +482,33 @@ sys_pipe(void)
 int 
 sys_symlink(void){
 
-  char*target,*path;
+  char*path,*target;
 
-  if( argstr(0,&target) <0 || argstr(1,&path) <0 ){
+  if(argstr(0,&target) < 0 || argstr(0,&path) < 0){
     return -1;
   }
 
   begin_op();
 
-  struct inode* ip = create(path,T_SYMLINK,0,0);
+  struct inode*ip = create(path,T_SYMLINK,0,0);
 
-  if(ip == 0){
+  if(ip==0){
     end_op();
     return -1;
   }
 
   int len = strlen(target);
 
-  if( len > MAXFILE_NAME){
-    panic("large symlink file_name ");
+  if( len> MAXFILE_NAME){
+    cprintf("target file name too big \n");
+    end_op();
+    return -1;
   }
 
-  strncpy(ip->symlink_name,target,len+1);
-
+  strncpy(ip->symlink_name,target,len+1); // len+1 is neccasry to copy null character
 
   iupdate(ip);
   iunlockput(ip);
-
   end_op();
-
-  return 0;
 
 }
