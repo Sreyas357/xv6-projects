@@ -174,6 +174,7 @@ growproc(int n)
   return 0;
 }
 
+
 // Create a new process copying p as the parent.
 // Sets up stack to return as if from system call.
 // Caller must set state of returned proc to RUNNABLE.
@@ -209,6 +210,16 @@ fork(void)
   np->cwd = idup(curproc->cwd);
 
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
+  
+  //copying memory mapped regions of parent to child
+
+  for(int i = 0 ; i < 100 ; i++){
+    copy_vma(&curproc->vma[i],&np->vma[i]);
+  }
+
+  np->curr_max = KERNBASE-2*PGSIZE; //set currmax
+
+  //endcopying 
 
   pid = np->pid;
 
@@ -241,6 +252,21 @@ exit(void)
       curproc->ofile[fd] = 0;
     }
   }
+
+
+  // unmapping all memory mapped regions by mmap
+  // this to write back if any shared pages are present
+
+  struct vma_area_struct *vma;
+  
+  for(int i = 0 ; i < 100 ; i++){
+    vma = &curproc->vma[i];
+    if(vma->valid  ){
+      munmap(vma->start_base,vma->len);
+    }
+   
+  }
+  //end unmmaping 
 
   begin_op();
   iput(curproc->cwd);

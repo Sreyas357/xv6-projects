@@ -6,6 +6,11 @@
 #include "mmu.h"
 #include "proc.h"
 #include "elf.h"
+#include "spinlock.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
+
 
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
@@ -68,8 +73,11 @@ mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm)
   for(;;){
     if((pte = walkpgdir(pgdir, a, 1)) == 0)
       return -1;
-    if(*pte & PTE_P)
+    if(*pte & PTE_P){
+      cprintf("remap for %p \n",(char*)va);
       panic("remap");
+    }
+      
     *pte = pa | perm | PTE_P;
     if(a == last)
       break;
@@ -384,6 +392,234 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
   }
   return 0;
 }
+
+
+int
+mmap_read(struct file*f,uint va, uint off,uint size){
+
+  ilock(f->ip);
+
+  int n = readi(f->ip,(char*)va,off,size);
+
+  iunlock(f->ip);
+
+  return off+n;
+
+}
+
+
+int copy_vma(struct vma_area_struct *src,struct vma_area_struct*dest){
+  
+  if(dest == 0){return -1;}
+
+  memmove(dest,src,sizeof(struct vma_area_struct));
+  if(dest->valid)
+    dest->file = filedup(src->file);
+  return 0;
+
+}
+
+int mmap( char*addr ,uint len, uint prot ,uint flags ,uint fd , uint off){
+
+  struct proc*p= myproc();
+  struct vma_area_struct*vma=0;
+  struct file*file;
+
+  if(fd > MAXOPBLOCKS || (file = p->ofile[fd]) == 0){
+    cprintf("Invalid fd \n");
+    return -1;
+  }
+
+  if( flags & MAP_SHARED){
+  
+    if( !(file->writable) && ( prot & PTE_W)){
+      cprintf("trying to open file with write perm which does not have that \n");
+      return -1;
+    }
+
+  }
+
+  for(int i = 0 ; i< 100 ; i++){
+    if( p->vma[i].valid == 0){
+      vma = &p->vma[i];
+      break;
+    }
+  }
+
+  if( vma == 0){
+    cprintf("No free vma regions available \n");
+    return -1;
+  }
+
+  
+
+  vma->valid =1;
+  vma->start_base = PGROUNDDOWN(p->curr_max-len);
+  vma->end_base = vma->start_base+len;
+  vma->len = len;
+  vma->prot = prot;
+  vma->flags = flags;
+  
+  vma->off = off;
+  vma->fd = fd;
+  vma->file = filedup(file);
+
+  p->curr_max = vma->start_base;
+
+  return vma->start_base;
+
+}
+
+static int check_in_range( struct vma_area_struct*vma, uint addr,uint len){
+  if((addr == vma->start_base && addr+len <= vma->end_base) ||
+    ( addr+len == vma->end_base && addr >= vma->start_base)){
+      return 1;
+  } 
+  return 0;
+}
+
+int munmap(uint addr ,uint len){
+
+
+  if( addr%PGSIZE || (addr+len)%PGSIZE ){
+    cprintf("addr not a multiple of PGSIZE\n");
+    return -1;
+  }  
+
+  struct proc*p = myproc();
+  struct vma_area_struct *vma = 0;
+
+  for(int i = 0 ; i< 100 ; i++ ){
+    if( check_in_range(&p->vma[i],addr,len)){
+      vma = &p->vma[i];
+      break;
+    }
+  }
+
+  if(vma == 0){
+    cprintf("invalid addr or trying to unmap in between regions \n");
+  }
+
+  if( vma->flags & MAP_SHARED){
+
+    uint off = vma->off + addr - vma->start_base;// intialize offset for writing to file
+    struct file*file = vma->file;
+
+    for(uint I = addr ; I < addr+len ; I+= PGSIZE ,off += PGSIZE ){
+
+      pde_t *pte = walkpgdir(p->pgdir,(char*)I,0);
+      
+      if( pte && *pte & PTE_P){ //just to ensure not having unncesary page faults
+        
+        int n = PGSIZE;
+        if( n > (addr+len -I)){
+          n = addr+ len-I;
+        }
+
+        begin_op();
+        ilock(file->ip);
+
+        writei(file->ip,(char*)I,off,n);
+
+        iunlock(file->ip);
+        end_op();
+
+      }
+
+    }
+
+  }
+
+
+  for(uint I = addr ; I < addr+len ; I+= PGSIZE){
+
+    pde_t*pte = walkpgdir(p->pgdir,(char*)I,0);
+
+    if(pte && (*pte&PTE_P)){
+      int newsiz = deallocuvm(p->pgdir,I+PGSIZE,I);
+      if( newsiz != I)
+        panic("error deallocing");
+      
+    }
+
+  }
+
+  if( (addr+len) < PGROUNDUP(vma->end_base)){
+    vma->start_base= addr+len;
+    vma->len -= len;
+    vma->off += len;
+  }
+  else if( addr > vma->start_base){
+    vma->end_base =addr;
+    vma->len-=len;
+  }
+  else{
+    vma->valid =0;
+    fileclose(vma->file);
+  }
+
+  return 0;
+
+}
+
+int trap_helper(uint fault_addr){
+  
+
+  struct vma_area_struct*vma = 0;
+  struct proc*p = myproc();
+
+  for(int i = 0 ; i < 100 ; i++){
+    if( p->vma[i].start_base <= fault_addr && p->vma[i].end_base > fault_addr){
+      vma = &p->vma[i];
+      break;
+    }
+  }
+
+  if(vma == 0){
+    p->killed=1;
+    return 0;
+  }
+
+  char*pa=kalloc();
+
+  if(pa == 0){
+    cprintf("error allocating memory for mmapedregion \n");
+    p->killed=1;
+    return 0;
+  }
+
+  memset(pa,0,PGSIZE);
+
+  uint fault_addr_head = PGROUNDDOWN(fault_addr);
+
+  if( mappages(p->pgdir,(char*)fault_addr_head,PGSIZE,V2P(pa) , vma->prot | PTE_U) < 0){
+    kfree(pa);
+    cprintf("error mapping \n");
+    p->killed =1;
+    return 0;
+  }
+
+  pde_t*pte = walkpgdir(p->pgdir,(char*)fault_addr,0);
+  int check = 0;
+  
+  if((*pte & PTE_W) == 0){
+    *pte |=PTE_W;  //write perm is needed to write into memory from file
+    check =1; // to remove write permissions after writing
+  }
+
+
+  uint off = vma->off + fault_addr_head - vma->start_base;
+  mmap_read(vma->file,fault_addr_head,off,PGSIZE); 
+
+  
+  if(check){
+    *pte &= ~(PTE_W);
+  }
+  return 1;
+
+}
+
+
 
 //PAGEBREAK!
 // Blank page.

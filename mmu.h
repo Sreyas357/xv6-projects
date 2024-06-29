@@ -96,6 +96,13 @@ struct segdesc {
 #define PTE_U           0x004   // User
 #define PTE_PS          0x080   // Page Size
 
+
+#define MAP_SHARED 0x001
+#define MAP_PRIVATE 0x002
+
+#define PROT_READ 0x001
+#define PROT_WRITE 0x002
+
 // Address in page table or page directory entry
 #define PTE_ADDR(pte)   ((uint)(pte) & ~0xFFF)
 #define PTE_FLAGS(pte)  ((uint)(pte) &  0xFFF)

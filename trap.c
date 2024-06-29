@@ -47,6 +47,15 @@ trap(struct trapframe *tf)
   }
 
   switch(tf->trapno){
+
+  case T_PGFLT :
+
+    uint fault_addr = rcr2();
+    
+    trap_helper(fault_addr);
+
+    break;
+
   case T_IRQ0 + IRQ_TIMER:
     if(cpuid() == 0){
       acquire(&tickslock);

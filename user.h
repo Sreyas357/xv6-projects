@@ -37,3 +37,5 @@ void* memset(void*, int, uint);
 void* malloc(uint);
 void free(void*);
 int atoi(const char*);
+int mmap(void*addr , int len, int prot , int flags , int fd , int offset );
+int munmap(char*addr,int len);
